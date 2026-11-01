@@ -1,0 +1,68 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 600' width='400' height='600'>
+    <defs>
+      <linearGradient id='canGrad' x1='0%' y1='0%' x2='100%' y2='0%'>
+        <stop offset='0%' stop-color='#9f1239'/>
+        <stop offset='25%' stop-color='#e11d48'/>
+        <stop offset='55%' stop-color='#f43f5e'/>
+        <stop offset='85%' stop-color='#e11d48'/>
+        <stop offset='100%' stop-color='#9f1239'/>
+      </linearGradient>
+      <linearGradient id='metalRim' x1='0%' y1='0%' x2='100%' y2='0%'>
+        <stop offset='0%' stop-color='#64748b'/>
+        <stop offset='50%' stop-color='#f8fafc'/>
+        <stop offset='100%' stop-color='#475569'/>
+      </linearGradient>
+      <linearGradient id='highlight' x1='0%' y1='0%' x2='100%' y2='0%'>
+        <stop offset='0%' stop-color='#ffffff' stop-opacity='0.4'/>
+        <stop offset='100%' stop-color='#ffffff' stop-opacity='0'/>
+      </linearGradient>
+      <filter id='shadow' x='-10%' y='-5%' width='120%' height='115%'>
+        <feDropShadow dx='0' dy='15' stdDeviation='18' flood-color='#000000' flood-opacity='0.6'/>
+      </filter>
+    </defs>
+    <!-- Background backdrop for photography card look -->
+    <rect width='400' height='600' rx='28' fill='#0b1120'/>
+    <circle cx='200' cy='300' r='180' fill='#e11d48' opacity='0.12' filter='blur(30px)'/>
+
+    <!-- Can Graphic -->
+    <g filter='url(#shadow)'>
+      <!-- Top Rim Lip -->
+      <ellipse cx='200' cy='95' rx='95' ry='24' fill='url(#metalRim)'/>
+      <ellipse cx='200' cy='93' rx='80' ry='18' fill='#1e293b'/>
+      <!-- Pull tab -->
+      <ellipse cx='200' cy='93' rx='28' ry='8' fill='#cbd5e1'/>
+      <circle cx='200' cy='93' r='4' fill='#0f172a'/>
+
+      <!-- Can Cylinder Body -->
+      <path d='M 105 98 L 105 480 Q 105 525 200 525 Q 295 525 295 480 L 295 98 Z' fill='url(#canGrad)'/>
+
+      <!-- Specular Highlight streak -->
+      <path d='M 145 99 L 155 515 Q 168 522 178 523 L 168 99 Z' fill='url(#highlight)'/>
+
+      <!-- Custom Art & Logos -->
+      
+  <g transform='translate(200, 270)'>
+    <circle cx='0' cy='-15' r='38' fill='#eab308'/>
+    <!-- Charging Bulls -->
+    <path d='M -50 -15 Q -25 -25 0 -12 Q -20 -3 -50 -15 Z' fill='#dc2626'/>
+    <path d='M 50 -15 Q 25 -25 0 -12 Q 20 -3 50 -15 Z' fill='#dc2626'/>
+  </g>
+  <text x='200' y='350' font-family='Impact, sans-serif' font-size='30' fill='#ffffff' text-anchor='middle' letter-spacing='1'>Red Bull</text>
+  <text x='200' y='376' font-family='system-ui, sans-serif' font-size='12' font-weight='800' fill='#e2e8f0' text-anchor='middle' letter-spacing='2'>ENERGY DRINK</text>
+  <rect x='130' y='398' width='140' height='26' rx='13' fill='#b91c1c'/>
+  <text x='200' y='416' font-family='system-ui, sans-serif' font-size='12' font-weight='900' fill='#ffffff' text-anchor='middle'>SUMMER EDITION</text>
+  <text x='200' y='446' font-family='system-ui, sans-serif' font-size='15' font-weight='900' fill='#fecdd3' text-anchor='middle'>MELANCIA</text>
+
+
+      <!-- Bottom Rim Lip -->
+      <ellipse cx='200' cy='485' rx='95' ry='22' fill='url(#metalRim)' opacity='0.85'/>
+      <path d='M 115 485 Q 200 508 285 485 L 285 498 Q 200 520 115 498 Z' fill='#334155'/>
+    </g>
+
+    <!-- Volume badge -->
+    <rect x='160' y='548' width='80' height='26' rx='13' fill='#1e293b' stroke='#334155'/>
+    <text x='200' y='566' font-family='system-ui, sans-serif' font-size='13' font-weight='700' fill='#94a3b8' text-anchor='middle'>250 ml</text>
+
+    <rect x='110' y='28' width='180' height='28' rx='14' fill='#eab308' fill-opacity='0.18' stroke='#eab308'/>
+    <text x='200' y='47' font-family='system-ui, sans-serif' font-size='12' font-weight='800' fill='#fde047' text-anchor='middle'>★ Edição de Verão</text>
+  </svg>

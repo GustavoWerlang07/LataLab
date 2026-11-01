@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .pb-safe {
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+  .pt-safe {
+    padding-top: max(16px, env(safe-area-inset-top));
+  }
+}
+
+/* Hide scrollbars for touch scroll areas */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

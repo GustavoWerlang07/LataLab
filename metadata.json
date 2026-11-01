@@ -1,0 +1,10 @@
+{
+  "name": "LataVault — Minha Coleção de Latinhas",
+  "description": "Gerenciador inteligente para coleção de latinhas de bebidas com identificação visual por IA, verificador de repetidas e catálogo detalhado.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
