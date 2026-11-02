@@ -64,6 +64,7 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
   const [duplicateWarning, setDuplicateWarning] = useState<CanItem | null>(null);
   const [duplicateScore, setDuplicateScore] = useState<number>(0);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -80,18 +81,65 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Ultra-fast client-side image compression: converts heavy 15MB phone camera photos to ~150KB JPEG
+  const compressImageFile = (file: File, maxDim = 1200, quality = 0.85): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(e.target?.result as string);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL('image/jpeg', quality);
+          resolve(compressed);
+        };
+        img.onerror = () => resolve(e.target?.result as string);
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = () => {
-      const b64 = reader.result as string;
-      setPhotoBase64(b64);
-      analyzePhoto(b64, file.name);
-    };
-    reader.readAsDataURL(file);
+    setSaveErrorMessage(null);
+    setIsAnalyzing(true);
+
+    try {
+      // Compress immediately on client before sending
+      const compressedB64 = await compressImageFile(file, 1200, 0.85);
+      if (compressedB64) {
+        setPhotoBase64(compressedB64);
+        await analyzePhoto(compressedB64, file.name);
+      } else {
+        setIsAnalyzing(false);
+      }
+    } catch (err) {
+      console.error('Compression error:', err);
+      setIsAnalyzing(false);
+    }
   };
 
   const populateFields = (data: any) => {
@@ -121,6 +169,7 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
     setIsAnalyzing(true);
     setIsIdentified(false);
     setAnalysisNote(null);
+    setSaveErrorMessage(null);
 
     try {
       const response = await fetch('/api/can/analyze', {
@@ -132,9 +181,13 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
         }),
       });
 
+      if (!response.ok) {
+        throw new Error(`Serviço indisponível (${response.status})`);
+      }
+
       const data = await response.json();
 
-      if (data.success) {
+      if (data.success && (data.brand || data.product)) {
         populateFields(data);
         setIsIdentified(true);
       } else {
@@ -147,7 +200,8 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
         setIsIdentified(true);
       }
     } catch (err: any) {
-      console.error(err);
+      console.warn('Notice during image analysis:', err);
+      // Fallback
       setBrand('Lata Colecionável');
       setProduct('Bebida em Lata');
       setVariant('Original');
@@ -177,9 +231,11 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
     setDuplicateWarning(null);
     setDuplicateScore(0);
     setShowManualFields(false);
+    setSaveErrorMessage(null);
   };
 
   const handleSubmit = async (overrideDuplicateCheck = false) => {
+    setSaveErrorMessage(null);
     const finalBrand = brand.trim() || 'Lata Colecionável';
     const finalProduct = product.trim() || 'Bebida em Lata';
 
@@ -210,9 +266,9 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
         imageBase64: photoBase64,
       });
       onClose();
-    } catch (err) {
-      console.error(err);
-      alert('Erro ao salvar latinha.');
+    } catch (err: any) {
+      console.error('Erro ao salvar latinha:', err);
+      setSaveErrorMessage(err.message || 'Erro ao salvar latinha no acervo. Tente novamente.');
     } finally {
       setIsSaving(false);
     }
@@ -435,6 +491,24 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
                       >
                         <Plus className="w-3.5 h-3.5" />
                         Atualizar quantidade (+1 na lata existente)
+                      </button>
+                    </div>
+                  )}
+
+                  {/* SAVE ERROR MESSAGE (if any) */}
+                  {saveErrorMessage && (
+                    <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs flex items-start gap-2 animate-fade-in">
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="font-bold text-white">Erro ao salvar latinha</p>
+                        <p className="text-[11px] text-rose-300/90 mt-0.5">{saveErrorMessage}</p>
+                      </div>
+                      <button 
+                        type="button" 
+                        onClick={() => setSaveErrorMessage(null)}
+                        className="text-slate-400 hover:text-white p-0.5"
+                      >
+                        <X className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   )}

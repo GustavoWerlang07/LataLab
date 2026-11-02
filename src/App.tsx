@@ -106,18 +106,24 @@ export default function App() {
 
   // Handlers for can actions
   const handleSaveNewCan = async (canData: any) => {
-    const res = await fetch('/api/cans', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(canData),
-    });
+    try {
+      const res = await fetch('/api/cans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(canData),
+      });
 
-    if (!res.ok) {
-      throw new Error('Falha ao salvar latinha.');
+      if (!res.ok) {
+        const errorJson = await res.json().catch(() => ({}));
+        throw new Error(errorJson.error || 'Falha ao salvar latinha no acervo.');
+      }
+
+      const saved = await res.json();
+      setCans((prev) => [saved, ...prev]);
+    } catch (err: any) {
+      console.error('Erro ao salvar latinha:', err);
+      throw err;
     }
-
-    const saved = await res.json();
-    setCans((prev) => [saved, ...prev]);
   };
 
   const handleEditCan = async (updatedCan: CanItem) => {

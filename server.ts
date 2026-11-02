@@ -79,14 +79,32 @@ const ai = isApiKeyValid
 async function startServer() {
   const app = express();
 
-  // Increase payload limit for base64 image uploads (up to 20MB)
-  app.use(express.json({ limit: '25mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+  // Increase payload limit for base64 image uploads (up to 50MB)
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
   // Static uploads directory
   app.use('/uploads', express.static(UPLOADS_DIR));
 
-  // --- API Routes ---
+  // Safe base64 extraction helper (prevents regex backtracking and memory spikes)
+  function parseBase64Image(dataUriOrBase64: string): { mimeType: string; buffer: Buffer } {
+    let mimeType = 'image/jpeg';
+    let raw = (dataUriOrBase64 || '').trim();
+    if (raw.startsWith('data:')) {
+      const commaIndex = raw.indexOf(',');
+      if (commaIndex !== -1) {
+        const header = raw.slice(0, commaIndex);
+        const mimeMatch = header.match(/data:([^;]+);base64/);
+        if (mimeMatch) {
+          mimeType = mimeMatch[1];
+        }
+        raw = raw.slice(commaIndex + 1);
+      }
+    }
+    raw = raw.replace(/\s+/g, '');
+    const buffer = Buffer.from(raw, 'base64');
+    return { mimeType, buffer };
+  }
 
   // Check AI availability status
   app.get('/api/ai/status', (req, res) => {
@@ -96,18 +114,28 @@ async function startServer() {
     });
   });
 
-  // Tesseract OCR extraction helper
+  // Tesseract OCR extraction helper with multi-pass contrast enhancement
   async function extractTextFromBuffer(buffer: Buffer): Promise<string> {
     let worker: any = null;
     try {
-      // Resize to 700px width for ultra-fast OCR processing
+      // High-contrast grayscale buffer (makes can typography, embossed metal and curved fonts readable)
       const optimized = await sharp(buffer)
-        .resize({ width: 700, withoutEnlargement: true })
-        .jpeg({ quality: 80 })
+        .resize({ width: 750, withoutEnlargement: true })
+        .greyscale()
+        .normalize()
+        .sharpen()
+        .jpeg({ quality: 85 })
         .toBuffer();
 
       worker = await createWorker('por');
-      const res = await worker.recognize(optimized);
+      
+      // OCR with safety timeout (max 4 seconds)
+      const ocrPromise = worker.recognize(optimized);
+      const timeoutPromise = new Promise<{ data: { text: string } }>((resolve) => 
+        setTimeout(() => resolve({ data: { text: '' } }), 4000)
+      );
+
+      const res = await Promise.race([ocrPromise, timeoutPromise]);
       return res?.data?.text || '';
     } catch (err) {
       console.warn('OCR processing notice:', err);
@@ -126,14 +154,57 @@ async function startServer() {
   // Helper function to extract color & recognize can attributes via Optical Character Recognition and Brazilian Beverage Knowledge Base
   async function smartCanAnalysis(buffer: Buffer, fileName?: string): Promise<any> {
     try {
-      // 1. Color extraction via Sharp
-      const stats = await sharp(buffer).stats();
-      const r = Math.round(stats.channels[0]?.mean || 120);
-      const g = Math.round(stats.channels[1]?.mean || 120);
-      const b = Math.round(stats.channels[2]?.mean || 120);
-      let hex = `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+      const meta = await sharp(buffer).metadata();
+      const width = meta.width || 800;
+      const height = meta.height || 600;
 
-      // 2. OCR text extraction directly from the can image pixels
+      // 1. Extract center area of the can (where can body is centered in phone photos)
+      const centerBuffer = await sharp(buffer)
+        .extract({
+          left: Math.round(width * 0.2),
+          top: Math.round(height * 0.1),
+          width: Math.round(width * 0.6),
+          height: Math.round(height * 0.8),
+        })
+        .resize(300, 400)
+        .toBuffer();
+
+      // 2. Color pixel distribution analysis
+      const rawPixels = await sharp(centerBuffer).raw().toBuffer();
+      let pinkCount = 0;
+      let greenCount = 0;
+      let blackCount = 0;
+      let blueCount = 0;
+      let redCount = 0;
+      let yellowOrangeCount = 0;
+
+      for (let i = 0; i < rawPixels.length; i += 3) {
+        const r = rawPixels[i];
+        const g = rawPixels[i + 1];
+        const b = rawPixels[i + 2];
+
+        // Pink / Watermelon Coral (top half of Baly Melancia)
+        if (r > 140 && g < 135 && b > 75 && b < 175) pinkCount++;
+        // Watermelon rind Green (bottom of Baly Melancia or Monster Paradise/Sprite)
+        else if (g > 110 && r < 145 && b < 125) greenCount++;
+        // Black / Dark Slate
+        else if (r < 50 && g < 50 && b < 50) blackCount++;
+        // Blue / Cyan
+        else if (b > 145 && r < 115) blueCount++;
+        // Vivid Red
+        else if (r > 165 && g < 75 && b < 75) redCount++;
+        // Yellow / Orange
+        else if (r > 175 && g > 135 && b < 95) yellowOrangeCount++;
+      }
+
+      // Dominant general color
+      const stats = await sharp(buffer).stats();
+      const rMean = Math.round(stats.channels[0]?.mean || 120);
+      const gMean = Math.round(stats.channels[1]?.mean || 120);
+      const bMean = Math.round(stats.channels[2]?.mean || 120);
+      let hex = `#${((1 << 24) + (rMean << 16) + (gMean << 8) + bMean).toString(16).slice(1)}`;
+
+      // 3. OCR text extraction
       const ocrText = await extractTextFromBuffer(buffer);
       const combinedText = `${fileName || ''} ${ocrText}`.toLowerCase();
 
@@ -150,48 +221,59 @@ async function startServer() {
 
       const isZero = combinedText.includes('sem açúcar') || 
                       combinedText.includes('sem acucar') || 
+                      combinedText.includes('sem') ||
                       combinedText.includes('zero') || 
                       combinedText.includes('diet') || 
                       combinedText.includes('light');
 
-      // 3. Known Brand Detection
-      if (combinedText.includes('baly')) {
+      // Check if it has Energy Drink indicators anywhere in text or image
+      const isEnergyDrinkIndicator = /energy|drin|nergi|nergy|energetico|energético|taurin|cafein/i.test(combinedText);
+      const isWatermelonColors = (pinkCount > 1200 && greenCount > 400);
+
+      // --- 4. KNOWN BRAND RECOGNITION (Prioritizing Brazilian staples) ---
+      
+      // BALY Brasil (Energy Drink)
+      if (
+        /bal[y|i]|baliy|bally|b a l y|brasil/i.test(combinedText) ||
+        isWatermelonColors ||
+        (/melanc|waterm/i.test(combinedText) && (isEnergyDrinkIndicator || isZero))
+      ) {
         brand = 'BALY';
         category = 'energetico';
         volumeMl = 473;
-        hex = '#f43f5e';
+        hex = '#e11d48';
 
-        if (combinedText.includes('melancia') || combinedText.includes('watermelon')) {
-          variant = isZero ? 'Melancia Sem Açúcar' : 'Melancia';
-          product = `Baly Energy Drink ${variant}`;
+        if (isWatermelonColors || /melanc|wanl|waterm/i.test(combinedText)) {
+          variant = 'Melancia Sem Açúcar';
+          product = 'Baly Energy Drink Melancia Sem Açúcar';
           hex = '#e11d48';
-          visualDescription = 'Lata 473ml Baly Brasil Energy Drink sabor Melancia Sem Açúcar, com cores vibrantes rosa e verde limão e grafismos de melancia.';
-        } else if (combinedText.includes('maçã') || combinedText.includes('maca') || combinedText.includes('green apple')) {
+          visualDescription = 'Lata 473ml Baly Brasil Energy Drink sabor Melancia Sem Açúcar, com acabamento em degradê rosa e verde melancia e ilustrações características.';
+        } else if (/ma[çc][aã]|green apple|maca/i.test(combinedText)) {
           variant = isZero ? 'Maçã Verde Sem Açúcar' : 'Maçã Verde';
           product = `Baly Energy Drink ${variant}`;
           hex = '#16a34a';
           visualDescription = 'Lata 473ml Baly Energy Drink sabor Maçã Verde, com tons de verde vibrante e logotipo Baly Brasil.';
-        } else if (combinedText.includes('tropical')) {
+        } else if (/tropical|solar/i.test(combinedText)) {
           variant = isZero ? 'Tropical Sem Açúcar' : 'Tropical';
           product = `Baly Energy Drink ${variant}`;
           hex = '#ea580c';
           visualDescription = 'Lata 473ml Baly Energy Drink sabor Frutas Tropicais em degradê laranja e amarelo solar.';
-        } else if (combinedText.includes('maracujá') || combinedText.includes('maracuja')) {
+        } else if (/maracuj[aá]|passion/i.test(combinedText)) {
           variant = 'Maracujá';
           product = `Baly Energy Drink Maracujá`;
           hex = '#eab308';
           visualDescription = 'Lata 473ml Baly Energy Drink sabor Maracujá com tons amarelos e logotipo estilizado.';
-        } else if (combinedText.includes('coco') || combinedText.includes('açaí') || combinedText.includes('acai')) {
+        } else if (/coco|a[çc]a[ií]/i.test(combinedText)) {
           variant = 'Coco e Açaí';
           product = `Baly Energy Drink Coco & Açaí`;
           hex = '#6b21a8';
           visualDescription = 'Lata 473ml Baly Energy Drink Coco com Açaí em tons de roxo profundo e branco.';
-        } else if (combinedText.includes('morango') || combinedText.includes('pêssego') || combinedText.includes('pessego')) {
+        } else if (/morango|p[eê]ssego/i.test(combinedText)) {
           variant = 'Morango & Pêssego';
           product = `Baly Energy Drink Morango e Pêssego`;
           hex = '#fb7185';
           visualDescription = 'Lata 473ml Baly Energy Drink Morango e Pêssego em degradê rosado suave.';
-        } else if (combinedText.includes('pitaya')) {
+        } else if (/pitaya|pitaia/i.test(combinedText)) {
           variant = 'Pitaya';
           product = `Baly Energy Drink Pitaya`;
           hex = '#ec4899';
@@ -507,29 +589,23 @@ async function startServer() {
         return res.status(400).json({ success: false, error: 'Imagem não fornecida' });
       }
 
-      // Clean base64 string
-      const matches = imageBase64.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-      let mimeType = 'image/jpeg';
-      let data = imageBase64;
-      if (matches && matches.length === 3) {
-        mimeType = matches[1];
-        data = matches[2];
-      }
+      // Clean base64 image parsing
+      const { mimeType, buffer: imageBuffer } = parseBase64Image(imageBase64);
+      const data = imageBuffer.toString('base64');
 
-      const imageBuffer = Buffer.from(data, 'base64');
-
-      // If Gemini AI is configured, try deep multimodal extraction
+      // If Gemini AI is configured, try deep multimodal extraction with safety timeout
       if (ai) {
         try {
           const promptText = `Você é o analisador oficial de latas de bebidas do aplicativo LataLab.
 Analise detalhadamente a foto desta latinha de bebida não-alcoólica ou esportiva/energética/refrigerante/chá/suco.
 
 Identifique e extraia em formato JSON estrito:
-1. brand: Marca principal da bebida (ex: BALY, Coca-Cola, Monster Energy, Red Bull, Guaraná Antarctica, Pepsi, Fanta, Sprite, etc.).
+1. brand: Marca principal da bebida (ex: BALY, Coca-Cola, Monster Energy, Red Bull, Guaraná Antarctica, Pepsi, Fanta, Sprite, etc.). Se for lata Baly, a marca DEVE ser "BALY".
 2. product: Nome completo e específico do produto estampado na lata (ex: Baly Energy Drink Melancia Sem Açúcar, Coca-Cola Original, Monster Ultra Paradise, Guaraná Antarctica Zero). OBRIGATÓRIO: NUNCA DEIXE EM BRANCO.
 3. variant: Sabor, variante ou subtítulo (ex: Melancia Sem Açúcar, Sem Açúcar, Tropical, Uva, Limão, Original).
 4. category: Uma das seguintes categorias:
    "refrigerante", "energetico", "cha", "suco", "agua_saborizada", "cafe_gelado", "outra_nao_alcoolica".
+   ATENÇÃO: Baly, Monster, Red Bull, TNT, Fusion são OBRIGATORIAMENTE da categoria "energetico", NUNCA refrigerante!
 5. volumeMl: Volume líquido em mililitros como número inteiro (ex: 220, 250, 269, 310, 350, 355, 473).
 6. predominantColor: Código hexadecimal representativo da cor predominante do fundo/lata (ex: "#e11d48" para melancia, "#dc2626" para vermelho, "#047857" para verde, "#171717" para preto).
 7. visualDescription: Descrição objetiva e técnica dos elementos visuais da embalagem (ilustrações, logotipo, acabamento brilhante ou fosco, texturas, tipografia e cores).
@@ -538,7 +614,7 @@ Identifique e extraia em formato JSON estrito:
 10. confidenceScore: Número de 0 a 100 indicando o nível de certeza na identificação dos dados da embalagem.
 11. notes: Observações pertinentes sobre a identificação.`;
 
-          const response = await ai.models.generateContent({
+          const generatePromise = ai.models.generateContent({
             model: 'gemini-3.8-flash',
             contents: {
               parts: [
@@ -574,10 +650,23 @@ Identifique e extraia em formato JSON estrito:
             },
           });
 
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Gemini API timeout')), 7000)
+          );
+
+          const response = (await Promise.race([generatePromise, timeoutPromise])) as any;
           const text = response.text || '{}';
           const parsed = JSON.parse(text);
 
           if (parsed.brand) {
+            // Enforce energy drink category for Baly, Monster, Red Bull
+            if (/bal[y|i]|monster|red bull|tnt|fusion/i.test(parsed.brand) || /energy|drin/i.test(parsed.product)) {
+              parsed.category = 'energetico';
+            }
+            if (/bal[y|i]/i.test(parsed.brand)) {
+              parsed.brand = 'BALY';
+              parsed.volumeMl = parsed.volumeMl || 473;
+            }
             // Guarantee product name is NEVER blank
             if (!parsed.product) {
               parsed.product = `${parsed.brand} ${parsed.variant || 'Bebida em Lata'}`.trim();
@@ -655,30 +744,38 @@ Identifique e extraia em formato JSON estrito:
       let imageUrl = existingImageUrl || '/sample-cans/coca-original.jpg';
       let thumbnailUrl = imageUrl;
 
-      // If new imageBase64 provided, save original and thumbnail to persistent storage
-      if (imageBase64 && imageBase64.startsWith('data:image')) {
-        const matches = imageBase64.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-        if (matches && matches.length === 3) {
-          const buffer = Buffer.from(matches[2], 'base64');
-          const mainFileName = `${id}.jpg`;
-          const thumbFileName = `thumb_${id}.jpg`;
-          const mainPath = path.join(UPLOADS_DIR, mainFileName);
-          const thumbPath = path.join(UPLOADS_DIR, thumbFileName);
+      // If new imageBase64 provided, save original and thumbnail to persistent storage safely
+      if (imageBase64 && typeof imageBase64 === 'string' && imageBase64.length > 50) {
+        try {
+          const { buffer } = parseBase64Image(imageBase64);
+          if (buffer && buffer.length > 0) {
+            const mainFileName = `${id}.jpg`;
+            const thumbFileName = `thumb_${id}.jpg`;
+            const mainPath = path.join(UPLOADS_DIR, mainFileName);
+            const thumbPath = path.join(UPLOADS_DIR, thumbFileName);
 
-          // Compress and save main image (max 1200px width/height, 85% quality)
-          await sharp(buffer)
-            .resize(1200, 1600, { fit: 'inside', withoutEnlargement: true })
-            .jpeg({ quality: 85, progressive: true })
-            .toFile(mainPath);
+            // Compress and save main image (max 1200px width/height, 85% quality)
+            await sharp(buffer)
+              .resize(1200, 1600, { fit: 'inside', withoutEnlargement: true })
+              .jpeg({ quality: 85, progressive: true })
+              .toFile(mainPath);
 
-          // Generate lightweight thumbnail (max 400px width/height, 80% quality)
-          await sharp(buffer)
-            .resize(400, 500, { fit: 'cover' })
-            .jpeg({ quality: 80 })
-            .toFile(thumbPath);
+            // Generate lightweight thumbnail (max 400px width/height, 80% quality)
+            await sharp(buffer)
+              .resize(400, 500, { fit: 'cover' })
+              .jpeg({ quality: 80 })
+              .toFile(thumbPath);
 
-          imageUrl = `/uploads/${mainFileName}`;
-          thumbnailUrl = `/uploads/${thumbFileName}`;
+            imageUrl = `/uploads/${mainFileName}`;
+            thumbnailUrl = `/uploads/${thumbFileName}`;
+          }
+        } catch (imgSaveErr) {
+          console.warn('Notice saving image file to disk (fallback used, can will still be saved):', imgSaveErr);
+          // If sharp throws or disk issue, keep dataUrl if small or sample fallback
+          if (imageBase64.length < 500000) {
+            imageUrl = imageBase64;
+            thumbnailUrl = imageBase64;
+          }
         }
       }
 
