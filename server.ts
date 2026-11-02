@@ -79,9 +79,22 @@ const ai = isApiKeyValid
 async function startServer() {
   const app = express();
 
-  // Increase payload limit for base64 image uploads (up to 50MB)
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+  // Increase payload limit for base64 image uploads (up to 100MB)
+  app.use(express.json({ limit: '100mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '100mb' }));
+
+  // Friendly error handler for oversized payloads
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err?.type === 'entity.too.large' || err?.status === 413) {
+      return res.status(413).json({ 
+        error: 'A imagem enviada é muito grande. O app irá compactá-la automaticamente.' 
+      });
+    }
+    if (err instanceof SyntaxError && 'body' in err) {
+      return res.status(400).json({ error: 'Formato de dados JSON inválido.' });
+    }
+    next(err);
+  });
 
   // Static uploads directory
   app.use('/uploads', express.static(UPLOADS_DIR));

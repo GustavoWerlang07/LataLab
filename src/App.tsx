@@ -114,8 +114,21 @@ export default function App() {
       });
 
       if (!res.ok) {
-        const errorJson = await res.json().catch(() => ({}));
-        throw new Error(errorJson.error || 'Falha ao salvar latinha no acervo.');
+        let errorMsg = 'Falha ao salvar latinha no acervo.';
+        try {
+          const errorJson = await res.json();
+          if (errorJson?.error) errorMsg = errorJson.error;
+        } catch {
+          const rawText = await res.text().catch(() => '');
+          if (res.status === 413) {
+            errorMsg = 'A foto enviada é muito pesada. O LataLab comprimirá a foto automaticamente.';
+          } else if (rawText && rawText.length < 150) {
+            errorMsg = rawText;
+          } else {
+            errorMsg = `Erro no servidor (código ${res.status}).`;
+          }
+        }
+        throw new Error(errorMsg);
       }
 
       const saved = await res.json();

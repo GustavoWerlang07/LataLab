@@ -87,6 +87,8 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
 
+  const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
@@ -98,17 +100,58 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Ultra-safe client-side image compression: converts camera photos to ~100-150KB JPEG
-  const compressImageFile = (file: File, maxDim = 1000, quality = 0.8): Promise<string> => {
+  // Downscale any base64 data URL reliably to ensure it stays tiny (< 200KB)
+  const downscaleDataUrl = (dataUrl: string, maxDim = 800, quality = 0.75): Promise<string> => {
     return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const rawResult = (e.target?.result as string) || '';
+      if (!dataUrl || dataUrl.length < 250_000) {
+        resolve(dataUrl);
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        try {
+          let width = img.naturalWidth || img.width;
+          let height = img.naturalHeight || img.height;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, width);
+          canvas.height = Math.max(1, height);
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(dataUrl);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL('image/jpeg', quality);
+          resolve(compressed);
+        } catch {
+          resolve(dataUrl);
+        }
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  };
+
+  // Ultra-safe mobile image compression using URL.createObjectURL (prevents memory spikes and 413 errors)
+  const compressImageFile = (file: File, maxDim = 850, quality = 0.75): Promise<string> => {
+    return new Promise((resolve) => {
+      try {
+        const blobUrl = URL.createObjectURL(file);
         const img = new Image();
         img.onload = () => {
+          URL.revokeObjectURL(blobUrl);
           try {
-            let width = img.width;
-            let height = img.height;
+            let width = img.naturalWidth || img.width;
+            let height = img.naturalHeight || img.height;
             if (width > maxDim || height > maxDim) {
               if (width > height) {
                 height = Math.round((height * maxDim) / width);
@@ -123,21 +166,31 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
             canvas.height = Math.max(1, height);
             const ctx = canvas.getContext('2d');
             if (!ctx) {
-              resolve(rawResult);
+              resolve('');
               return;
             }
             ctx.drawImage(img, 0, 0, width, height);
             const compressed = canvas.toDataURL('image/jpeg', quality);
             resolve(compressed);
           } catch {
-            resolve(rawResult);
+            resolve('');
           }
         };
-        img.onerror = () => resolve(rawResult);
-        img.src = rawResult;
-      };
-      reader.onerror = () => resolve('');
-      reader.readAsDataURL(file);
+        img.onerror = () => {
+          URL.revokeObjectURL(blobUrl);
+          // Fallback to FileReader if ObjectURL failed
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const res = (e.target?.result as string) || '';
+            downscaleDataUrl(res, maxDim, quality).then(resolve);
+          };
+          reader.onerror = () => resolve('');
+          reader.readAsDataURL(file);
+        };
+        img.src = blobUrl;
+      } catch {
+        resolve('');
+      }
     });
   };
 
@@ -146,13 +199,18 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
     if (!file) return;
 
     setSaveErrorMessage(null);
+    setIsProcessingPhoto(true);
     try {
-      const compressedB64 = await compressImageFile(file, 1000, 0.8);
+      const compressedB64 = await compressImageFile(file, 850, 0.75);
       if (compressedB64) {
         setPhotoBase64(compressedB64);
       }
     } catch (err) {
       console.warn('Compression notice:', err);
+    } finally {
+      setIsProcessingPhoto(false);
+      // Reset input value so user can re-select same file if needed
+      e.target.value = '';
     }
   };
 
@@ -209,6 +267,12 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
 
     setIsSaving(true);
     try {
+      // Ensure photo is light (< 300KB) before transmitting
+      let safePhoto = photoBase64;
+      if (safePhoto && safePhoto.length > 350_000) {
+        safePhoto = await downscaleDataUrl(safePhoto, 800, 0.7);
+      }
+
       await onSaveNewCan({
         brand: finalBrand,
         product: finalProduct,
@@ -221,7 +285,7 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
         specialEditionDetails: (specialEditionDetails || '').trim(),
         quantity: Math.max(1, Number(quantity) || 1),
         originCountry: (originCountry || 'Brasil').trim(),
-        imageBase64: photoBase64,
+        imageBase64: safePhoto,
       });
       onClose();
     } catch (err: any) {
@@ -280,7 +344,13 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
               Foto da Embalagem
             </label>
 
-            {!photoBase64 ? (
+            {isProcessingPhoto ? (
+              <div className="p-6 rounded-2xl bg-slate-950/80 border border-blue-500/30 flex flex-col items-center justify-center gap-2 text-center animate-pulse">
+                <Loader2 className="w-6 h-6 text-blue-400 animate-spin" />
+                <span className="text-xs font-bold text-white">Processando imagem...</span>
+                <span className="text-[10px] text-slate-400">Otimizando resolução para salvar com rapidez</span>
+              </div>
+            ) : !photoBase64 ? (
               <div className="grid grid-cols-2 gap-2.5">
                 <button
                   type="button"
