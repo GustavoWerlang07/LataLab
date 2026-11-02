@@ -1,6 +1,6 @@
 {
-  "name": "LataVault — Minha Coleção de Latinhas",
-  "description": "Gerenciador inteligente para coleção de latinhas de bebidas com identificação visual por IA, verificador de repetidas e catálogo detalhado.",
+  "name": "LataLab — Minha Coleção de Latinhas",
+  "description": "Gerenciador completo para coleção pessoal de latinhas de bebidas com fotos, organização por marcas e catálogo detalhado.",
   "requestFramePermissions": [
     "camera"
   ],

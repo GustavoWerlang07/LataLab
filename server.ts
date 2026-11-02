@@ -716,9 +716,13 @@ Identifique e extraia em formato JSON estrito:
     const cans = readCans();
     res.json(cans);
   });
+  app.get('/api/can', (req, res) => {
+    const cans = readCans();
+    res.json(cans);
+  });
 
-  // 4. POST /api/cans - Create new can (with photo storage & thumbnail generation)
-  app.post('/api/cans', async (req, res) => {
+  // 4. POST /api/cans & /api/can - Create new can (fail-safe and resilient)
+  const handleCreateCan = async (req: express.Request, res: express.Response) => {
     try {
       const {
         brand,
@@ -734,17 +738,27 @@ Identifique e extraia em formato JSON estrito:
         originCountry,
         imageBase64,
         existingImageUrl,
-      } = req.body;
+      } = req.body || {};
 
-      if (!brand || !product) {
-        return res.status(400).json({ error: 'Marca e produto são campos obrigatórios.' });
+      // Ensure brand and product are always non-empty valid strings
+      let cleanBrand = (brand ? String(brand) : '').trim();
+      let cleanVariant = (variant ? String(variant) : '').trim();
+      let cleanProduct = (product ? String(product) : '').trim();
+
+      if (!cleanBrand && !cleanProduct) {
+        cleanBrand = 'Lata Colecionável';
+        cleanProduct = 'Bebida em Lata';
+      } else if (!cleanBrand) {
+        cleanBrand = 'Lata Colecionável';
+      } else if (!cleanProduct) {
+        cleanProduct = cleanVariant ? `${cleanBrand} ${cleanVariant}` : `${cleanBrand} Original`;
       }
 
       const id = 'can_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
       let imageUrl = existingImageUrl || '/sample-cans/coca-original.jpg';
       let thumbnailUrl = imageUrl;
 
-      // If new imageBase64 provided, save original and thumbnail to persistent storage safely
+      // Handle image safely without failing the whole can save
       if (imageBase64 && typeof imageBase64 === 'string' && imageBase64.length > 50) {
         try {
           const { buffer } = parseBase64Image(imageBase64);
@@ -754,25 +768,31 @@ Identifique e extraia em formato JSON estrito:
             const mainPath = path.join(UPLOADS_DIR, mainFileName);
             const thumbPath = path.join(UPLOADS_DIR, thumbFileName);
 
-            // Compress and save main image (max 1200px width/height, 85% quality)
-            await sharp(buffer)
-              .resize(1200, 1600, { fit: 'inside', withoutEnlargement: true })
-              .jpeg({ quality: 85, progressive: true })
-              .toFile(mainPath);
+            try {
+              // Attempt sharp compression
+              await sharp(buffer)
+                .resize(1000, 1400, { fit: 'inside', withoutEnlargement: true })
+                .jpeg({ quality: 80, progressive: true })
+                .toFile(mainPath);
 
-            // Generate lightweight thumbnail (max 400px width/height, 80% quality)
-            await sharp(buffer)
-              .resize(400, 500, { fit: 'cover' })
-              .jpeg({ quality: 80 })
-              .toFile(thumbPath);
+              await sharp(buffer)
+                .resize(360, 480, { fit: 'cover' })
+                .jpeg({ quality: 75 })
+                .toFile(thumbPath);
 
-            imageUrl = `/uploads/${mainFileName}`;
-            thumbnailUrl = `/uploads/${thumbFileName}`;
+              imageUrl = `/uploads/${mainFileName}`;
+              thumbnailUrl = `/uploads/${thumbFileName}`;
+            } catch (sharpErr) {
+              console.warn('Sharp processing failed, falling back to direct write:', sharpErr);
+              fs.writeFileSync(mainPath, buffer);
+              fs.writeFileSync(thumbPath, buffer);
+              imageUrl = `/uploads/${mainFileName}`;
+              thumbnailUrl = `/uploads/${thumbFileName}`;
+            }
           }
         } catch (imgSaveErr) {
-          console.warn('Notice saving image file to disk (fallback used, can will still be saved):', imgSaveErr);
-          // If sharp throws or disk issue, keep dataUrl if small or sample fallback
-          if (imageBase64.length < 500000) {
+          console.warn('Notice saving image file (fallback used):', imgSaveErr);
+          if (imageBase64.startsWith('data:image')) {
             imageUrl = imageBase64;
             thumbnailUrl = imageBase64;
           }
@@ -781,33 +801,45 @@ Identifique e extraia em formato JSON estrito:
 
       const newCan = {
         id,
-        brand: brand.trim(),
-        product: product.trim(),
-        variant: variant ? variant.trim() : '',
+        brand: cleanBrand,
+        product: cleanProduct,
+        variant: cleanVariant,
         category: category || 'refrigerante',
-        volumeMl: Number(volumeMl) || 350,
+        volumeMl: Math.max(1, Number(volumeMl) || 350),
         predominantColor: predominantColor || '#2563eb',
-        visualDescription: visualDescription ? visualDescription.trim() : '',
+        visualDescription: visualDescription ? String(visualDescription).trim() : '',
         isSpecialEdition: Boolean(isSpecialEdition),
-        specialEditionDetails: specialEditionDetails ? specialEditionDetails.trim() : '',
+        specialEditionDetails: specialEditionDetails ? String(specialEditionDetails).trim() : '',
         quantity: Math.max(1, Number(quantity) || 1),
-        originCountry: originCountry ? originCountry.trim() : 'Brasil',
+        originCountry: originCountry ? String(originCountry).trim() : 'Brasil',
         imageUrl,
         thumbnailUrl,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
 
-      const cans = readCans();
-      cans.unshift(newCan);
-      writeCans(cans);
+      try {
+        const cans = readCans();
+        cans.unshift(newCan);
+        writeCans(cans);
+      } catch (writeErr) {
+        console.error('Error writing to cans database file:', writeErr);
+        if (!fs.existsSync(DATA_DIR)) {
+          fs.mkdirSync(DATA_DIR, { recursive: true });
+        }
+        writeCans([newCan]);
+      }
 
+      console.log(`[LataLab] Latinha salva com sucesso: ${newCan.brand} - ${newCan.product} (${newCan.id})`);
       return res.status(201).json(newCan);
     } catch (err: any) {
-      console.error('Error creating can:', err);
-      return res.status(500).json({ error: err.message || 'Erro ao salvar latinha.' });
+      console.error('Critical error in handleCreateCan:', err);
+      return res.status(500).json({ error: err?.message || 'Erro ao salvar latinha no acervo.' });
     }
-  });
+  };
+
+  app.post('/api/cans', handleCreateCan);
+  app.post('/api/can', handleCreateCan);
 
   // 5. PUT /api/cans/:id - Update can
   app.put('/api/cans/:id', async (req, res) => {

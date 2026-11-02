@@ -4,7 +4,6 @@ import { CATEGORY_LABELS, findPotentialDuplicates } from '../utils/logic';
 import { 
   Camera, 
   Image as ImageIcon, 
-  Sparkles, 
   X, 
   AlertTriangle, 
   Check, 
@@ -13,12 +12,10 @@ import {
   RefreshCw,
   Plus,
   Minus,
-  ChevronDown,
-  ChevronUp,
   Tag,
   Layers,
   Droplet,
-  CheckCircle2
+  Trash2
 } from 'lucide-react';
 
 interface AddCanModalProps {
@@ -31,6 +28,36 @@ interface AddCanModalProps {
   initialAnalysis?: any;
 }
 
+const POPULAR_BRANDS = [
+  'BALY',
+  'Monster',
+  'Red Bull',
+  'Coca-Cola',
+  'Guaraná Antarctica',
+  'Pepsi',
+  'Fanta',
+  'Sprite',
+  'Heineken',
+  'TNT',
+];
+
+const COMMON_VOLUMES = [269, 310, 350, 355, 473, 500];
+
+const COLOR_SWATCHES = [
+  { name: 'Vermelho', hex: '#dc2626' },
+  { name: 'Melancia / Rosa', hex: '#f43f5e' },
+  { name: 'Verde', hex: '#16a34a' },
+  { name: 'Verde Escuro', hex: '#14532d' },
+  { name: 'Azul', hex: '#2563eb' },
+  { name: 'Azul Escuro', hex: '#1e3a8a' },
+  { name: 'Preto Grafite', hex: '#18181b' },
+  { name: 'Amarelo Ouro', hex: '#eab308' },
+  { name: 'Laranja', hex: '#ea580c' },
+  { name: 'Roxo Uva', hex: '#9333ea' },
+  { name: 'Prata / Alumínio', hex: '#94a3b8' },
+  { name: 'Branco Neve', hex: '#f8fafc' },
+];
+
 export const AddCanModal: React.FC<AddCanModalProps> = ({
   isOpen,
   onClose,
@@ -38,22 +65,16 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
   onSaveNewCan,
   onIncrementExistingQuantity,
   initialPhotoBase64,
-  initialAnalysis,
 }) => {
   const [photoBase64, setPhotoBase64] = useState<string>(initialPhotoBase64 || '');
-  const [fileName, setFileName] = useState<string>('');
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isIdentified, setIsIdentified] = useState(false);
-  const [analysisNote, setAnalysisNote] = useState<string | null>(null);
-  const [showManualFields, setShowManualFields] = useState(false);
-
-  // Form states (populated automatically by the system)
+  
+  // Form fields (100% direct manual input)
   const [brand, setBrand] = useState('');
   const [product, setProduct] = useState('');
   const [variant, setVariant] = useState('');
-  const [category, setCategory] = useState<CanCategory>('refrigerante');
+  const [category, setCategory] = useState<CanCategory>('energetico');
   const [volumeMl, setVolumeMl] = useState<number>(350);
-  const [predominantColor, setPredominantColor] = useState('#2563eb');
+  const [predominantColor, setPredominantColor] = useState('#f43f5e');
   const [visualDescription, setVisualDescription] = useState('');
   const [isSpecialEdition, setIsSpecialEdition] = useState(false);
   const [specialEditionDetails, setSpecialEditionDetails] = useState('');
@@ -73,46 +94,47 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
     if (initialPhotoBase64) {
       setPhotoBase64(initialPhotoBase64);
     }
-    if (initialAnalysis) {
-      populateFields(initialAnalysis);
-      setIsIdentified(true);
-    }
-  }, [initialPhotoBase64, initialAnalysis]);
+  }, [initialPhotoBase64]);
 
   if (!isOpen) return null;
 
-  // Ultra-fast client-side image compression: converts heavy 15MB phone camera photos to ~150KB JPEG
-  const compressImageFile = (file: File, maxDim = 1200, quality = 0.85): Promise<string> => {
+  // Ultra-safe client-side image compression: converts camera photos to ~100-150KB JPEG
+  const compressImageFile = (file: File, maxDim = 1000, quality = 0.8): Promise<string> => {
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onload = (e) => {
+        const rawResult = (e.target?.result as string) || '';
         const img = new Image();
         img.onload = () => {
-          let width = img.width;
-          let height = img.height;
-          if (width > maxDim || height > maxDim) {
-            if (width > height) {
-              height = Math.round((height * maxDim) / width);
-              width = maxDim;
-            } else {
-              width = Math.round((width * maxDim) / height);
-              height = maxDim;
+          try {
+            let width = img.width;
+            let height = img.height;
+            if (width > maxDim || height > maxDim) {
+              if (width > height) {
+                height = Math.round((height * maxDim) / width);
+                width = maxDim;
+              } else {
+                width = Math.round((width * maxDim) / height);
+                height = maxDim;
+              }
             }
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, width);
+            canvas.height = Math.max(1, height);
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              resolve(rawResult);
+              return;
+            }
+            ctx.drawImage(img, 0, 0, width, height);
+            const compressed = canvas.toDataURL('image/jpeg', quality);
+            resolve(compressed);
+          } catch {
+            resolve(rawResult);
           }
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            resolve(e.target?.result as string);
-            return;
-          }
-          ctx.drawImage(img, 0, 0, width, height);
-          const compressed = canvas.toDataURL('image/jpeg', quality);
-          resolve(compressed);
         };
-        img.onerror = () => resolve(e.target?.result as string);
-        img.src = e.target?.result as string;
+        img.onerror = () => resolve(rawResult);
+        img.src = rawResult;
       };
       reader.onerror = () => resolve('');
       reader.readAsDataURL(file);
@@ -123,125 +145,61 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setFileName(file.name);
     setSaveErrorMessage(null);
-    setIsAnalyzing(true);
-
     try {
-      // Compress immediately on client before sending
-      const compressedB64 = await compressImageFile(file, 1200, 0.85);
+      const compressedB64 = await compressImageFile(file, 1000, 0.8);
       if (compressedB64) {
         setPhotoBase64(compressedB64);
-        await analyzePhoto(compressedB64, file.name);
-      } else {
-        setIsAnalyzing(false);
       }
     } catch (err) {
-      console.error('Compression error:', err);
-      setIsAnalyzing(false);
+      console.warn('Compression notice:', err);
     }
   };
 
-  const populateFields = (data: any) => {
-    if (data.brand) setBrand(data.brand);
-    if (data.product) setProduct(data.product);
-    if (data.variant) setVariant(data.variant);
-    if (data.category && data.category in CATEGORY_LABELS) {
-      setCategory(data.category as CanCategory);
+  const handleSelectQuickBrand = (selectedBrand: string) => {
+    setBrand(selectedBrand);
+    if (!product) {
+      setProduct(`${selectedBrand}`);
     }
-    if (data.volumeMl) setVolumeMl(Number(data.volumeMl) || 350);
-    if (data.predominantColor) setPredominantColor(data.predominantColor);
-    if (data.visualDescription) setVisualDescription(data.visualDescription);
-    if (data.isSpecialEdition !== undefined) setIsSpecialEdition(Boolean(data.isSpecialEdition));
-    if (data.specialEditionDetails) setSpecialEditionDetails(data.specialEditionDetails);
-    if (data.notes) setAnalysisNote(data.notes);
-
-    // Check potential duplicate immediately
-    checkForPotentialDuplicates({
-      brand: data.brand,
-      product: data.product,
-      variant: data.variant,
-      volumeMl: data.volumeMl,
-    });
-  };
-
-  const analyzePhoto = async (base64: string, name?: string) => {
-    setIsAnalyzing(true);
-    setIsIdentified(false);
-    setAnalysisNote(null);
-    setSaveErrorMessage(null);
-
-    try {
-      const response = await fetch('/api/can/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          imageBase64: base64,
-          fileName: name || fileName,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Serviço indisponível (${response.status})`);
+    // Smart category helper for common brands
+    if (/baly|monster|red bull|tnt/i.test(selectedBrand)) {
+      setCategory('energetico');
+      if (selectedBrand === 'BALY') {
+        setVolumeMl(473);
+        setPredominantColor('#f43f5e'); // Melancia popular
+      } else if (selectedBrand === 'Red Bull') {
+        setVolumeMl(250);
+        setPredominantColor('#1e3a8a');
+      } else if (selectedBrand === 'Monster') {
+        setVolumeMl(473);
+        setPredominantColor('#18181b');
       }
-
-      const data = await response.json();
-
-      if (data.success && (data.brand || data.product)) {
-        populateFields(data);
-        setIsIdentified(true);
-      } else {
-        // Fallback default
-        setBrand('Lata Colecionável');
-        setProduct('Bebida em Lata');
-        setVariant('Original');
-        setCategory('refrigerante');
-        setVolumeMl(350);
-        setIsIdentified(true);
-      }
-    } catch (err: any) {
-      console.warn('Notice during image analysis:', err);
-      // Fallback
-      setBrand('Lata Colecionável');
-      setProduct('Bebida em Lata');
-      setVariant('Original');
+    } else if (/coca|pepsi|guaran|fanta|sprite/i.test(selectedBrand)) {
       setCategory('refrigerante');
       setVolumeMl(350);
-      setIsIdentified(true);
-    } finally {
-      setIsAnalyzing(false);
+      if (/coca/i.test(selectedBrand)) setPredominantColor('#dc2626');
+      if (/guaran/i.test(selectedBrand)) setPredominantColor('#16a34a');
+      if (/fanta/i.test(selectedBrand)) setPredominantColor('#ea580c');
+      if (/pepsi/i.test(selectedBrand)) setPredominantColor('#2563eb');
     }
-  };
-
-  const checkForPotentialDuplicates = (candidate: Partial<CanItem>) => {
-    const matches = findPotentialDuplicates(candidate, existingCans);
-    if (matches.length > 0 && matches[0].score >= 60) {
-      setDuplicateWarning(matches[0].item);
-      setDuplicateScore(matches[0].score);
-    } else {
-      setDuplicateWarning(null);
-      setDuplicateScore(0);
-    }
-  };
-
-  const handleResetPhoto = () => {
-    setPhotoBase64('');
-    setFileName('');
-    setIsIdentified(false);
-    setDuplicateWarning(null);
-    setDuplicateScore(0);
-    setShowManualFields(false);
-    setSaveErrorMessage(null);
   };
 
   const handleSubmit = async (overrideDuplicateCheck = false) => {
     setSaveErrorMessage(null);
-    const finalBrand = brand.trim() || 'Lata Colecionável';
-    const finalProduct = product.trim() || 'Bebida em Lata';
+    
+    const finalBrand = (brand || '').trim() || 'Lata Colecionável';
+    const finalVariant = (variant || '').trim();
+    let finalProduct = (product || '').trim();
+    if (!finalProduct) {
+      finalProduct = finalVariant ? `${finalBrand} ${finalVariant}` : `${finalBrand} Original`;
+    }
 
     // Check duplicate if not explicitly overridden
     if (!overrideDuplicateCheck && !duplicateWarning) {
-      const matches = findPotentialDuplicates({ brand: finalBrand, product: finalProduct, variant, volumeMl }, existingCans);
+      const matches = findPotentialDuplicates(
+        { brand: finalBrand, product: finalProduct, variant: finalVariant, volumeMl },
+        existingCans
+      );
       if (matches.length > 0 && matches[0].score >= 70) {
         setDuplicateWarning(matches[0].item);
         setDuplicateScore(matches[0].score);
@@ -254,21 +212,23 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
       await onSaveNewCan({
         brand: finalBrand,
         product: finalProduct,
-        variant,
+        variant: finalVariant,
         category,
-        volumeMl,
+        volumeMl: Number(volumeMl) || 350,
         predominantColor,
-        visualDescription,
+        visualDescription: (visualDescription || '').trim(),
         isSpecialEdition,
-        specialEditionDetails,
-        quantity,
-        originCountry,
+        specialEditionDetails: (specialEditionDetails || '').trim(),
+        quantity: Math.max(1, Number(quantity) || 1),
+        originCountry: (originCountry || 'Brasil').trim(),
         imageBase64: photoBase64,
       });
       onClose();
     } catch (err: any) {
       console.error('Erro ao salvar latinha:', err);
-      setSaveErrorMessage(err.message || 'Erro ao salvar latinha no acervo. Tente novamente.');
+      setSaveErrorMessage(
+        err?.message || 'Erro ao conectar ao acervo. Verifique os dados e tente novamente.'
+      );
     } finally {
       setIsSaving(false);
     }
@@ -293,422 +253,427 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
         className="hidden"
       />
 
-      <div className="w-full max-w-lg rounded-t-3xl sm:rounded-3xl bg-slate-900 border border-slate-800 text-white shadow-2xl flex flex-col max-h-[94vh] overflow-hidden">
+      <div className="w-full max-w-lg rounded-t-3xl sm:rounded-3xl bg-slate-900 border border-slate-800 text-white shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
         {/* Modal Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800/80 bg-slate-900/90 sticky top-0 z-10 backdrop-blur-md">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800/80 bg-slate-900/95 sticky top-0 z-10 backdrop-blur-md">
           <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></span>
+            <span 
+              className="w-3 h-3 rounded-full transition-colors shadow-sm"
+              style={{ backgroundColor: predominantColor }}
+            />
             <h2 className="font-extrabold text-base text-white">Cadastrar Latinha</h2>
           </div>
           <button
             onClick={onClose}
             aria-label="Fechar"
-            className="p-1 rounded-full text-slate-400 hover:text-white bg-slate-800"
+            className="p-1 rounded-full text-slate-400 hover:text-white bg-slate-800 transition active:scale-95"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Modal Content */}
-        <div className="p-5 space-y-4 overflow-y-auto">
-          {/* STEP 1: If no photo is loaded yet, show the high-contrast photo selectors */}
-          {!photoBase64 ? (
-            <div className="space-y-4 py-2">
-              <div className="text-center space-y-1">
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-xs font-semibold text-blue-400">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Identificação 100% Automática
-                </div>
-                <h3 className="font-bold text-lg text-white">Envie a foto da latinha</h3>
-                <p className="text-xs text-slate-400 max-w-xs mx-auto">
-                  O LataLab analisa a embalagem, descobre a marca e o sabor e preenche todas as informações sem você digitar nada.
-                </p>
-              </div>
+        {/* Modal Content - Direct Manual Form */}
+        <div className="p-5 space-y-5 overflow-y-auto">
+          {/* 1. PHOTO SECTION */}
+          <div>
+            <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
+              Foto da Embalagem
+            </label>
 
-              <div className="grid grid-cols-2 gap-3 pt-2">
+            {!photoBase64 ? (
+              <div className="grid grid-cols-2 gap-2.5">
                 <button
                   type="button"
                   onClick={() => cameraInputRef.current?.click()}
-                  className="p-5 rounded-2xl bg-gradient-to-br from-blue-600/20 to-slate-800/90 border border-blue-500/30 hover:border-blue-400 flex flex-col items-center justify-center gap-2.5 text-center group active:scale-95 transition shadow-lg"
+                  className="p-4 rounded-2xl bg-gradient-to-br from-blue-600/20 to-slate-800/90 border border-blue-500/30 hover:border-blue-400 flex flex-col items-center justify-center gap-2 text-center group active:scale-98 transition shadow"
                 >
-                  <div className="w-14 h-14 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-lg shadow-blue-600/40 group-hover:scale-105 transition">
-                    <Camera className="w-7 h-7" />
+                  <div className="w-11 h-11 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-md shadow-blue-600/40 group-hover:scale-105 transition">
+                    <Camera className="w-5 h-5" />
                   </div>
                   <div>
-                    <span className="font-bold text-sm text-white block">Tirar Foto</span>
-                    <span className="text-[11px] text-slate-400">Câmera do celular</span>
+                    <span className="font-bold text-xs text-white block">Tirar Foto</span>
+                    <span className="text-[10px] text-slate-400">Câmera do celular</span>
                   </div>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="p-5 rounded-2xl bg-slate-800/80 border border-slate-700 hover:border-slate-600 flex flex-col items-center justify-center gap-2.5 text-center group active:scale-95 transition shadow-lg"
+                  className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700 hover:border-slate-600 flex flex-col items-center justify-center gap-2 text-center group active:scale-98 transition shadow"
                 >
-                  <div className="w-14 h-14 rounded-2xl bg-slate-700 text-slate-200 flex items-center justify-center group-hover:scale-105 transition">
-                    <ImageIcon className="w-7 h-7" />
+                  <div className="w-11 h-11 rounded-xl bg-slate-700 text-slate-200 flex items-center justify-center group-hover:scale-105 transition">
+                    <ImageIcon className="w-5 h-5" />
                   </div>
                   <div>
-                    <span className="font-bold text-sm text-white block">Galeria</span>
-                    <span className="text-[11px] text-slate-400">Escolher arquivo</span>
+                    <span className="font-bold text-xs text-white block">Galeria</span>
+                    <span className="text-[10px] text-slate-400">Escolher imagem</span>
                   </div>
                 </button>
               </div>
-            </div>
-          ) : (
-            /* Photo is present */
-            <div className="space-y-4">
-              {/* Photo Card with Scanning state */}
+            ) : (
               <div 
-                className="relative rounded-2xl overflow-hidden bg-slate-950 border max-h-56 flex items-center justify-center transition-all duration-300"
-                style={{ borderColor: isIdentified ? predominantColor : '#334155' }}
+                className="relative rounded-2xl overflow-hidden bg-slate-950 border max-h-56 flex items-center justify-center transition-all shadow-inner"
+                style={{ borderColor: predominantColor }}
               >
                 <img
                   src={photoBase64}
                   alt="Foto da latinha"
-                  className="max-h-56 w-full object-contain"
+                  className="max-h-56 w-full object-contain bg-slate-950/80"
                 />
 
-                {/* Laser scanning animation while analyzing */}
-                {isAnalyzing && (
-                  <div className="absolute inset-0 bg-slate-950/75 backdrop-blur-[2px] flex flex-col items-center justify-center p-4">
-                    <div className="w-full h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent absolute top-0 animate-pulse"></div>
-                    <Loader2 className="w-9 h-9 text-blue-400 animate-spin mb-2.5" />
-                    <p className="font-bold text-sm text-white">Analisando latinha...</p>
-                    <p className="text-xs text-blue-300/90 mt-0.5 animate-pulse">
-                      Identificando marca, sabor, volume e edições
-                    </p>
-                  </div>
-                )}
-
-                {/* Change photo button */}
-                {!isAnalyzing && (
-                  <button
-                    onClick={handleResetPhoto}
-                    className="absolute bottom-2 right-2 px-3 py-1.5 rounded-full bg-slate-900/90 backdrop-blur-md text-[11px] font-semibold text-slate-200 border border-slate-700 hover:bg-slate-800 flex items-center gap-1.5 shadow-lg active:scale-95 transition"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    Trocar foto
-                  </button>
-                )}
-              </div>
-
-              {/* Automatic Recognition Summary Card */}
-              {isIdentified && !isAnalyzing && (
-                <div className="rounded-2xl bg-gradient-to-br from-slate-800/90 to-slate-900 border border-slate-700/80 p-4 space-y-3.5 shadow-xl">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                        <CheckCircle2 className="w-4 h-4" />
-                      </div>
-                      <span className="font-extrabold text-xs uppercase tracking-wider text-emerald-400">
-                        Identificação Automática Concluída
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-[11px] text-slate-300">
-                      <span 
-                        className="w-2.5 h-2.5 rounded-full inline-block shadow-sm"
-                        style={{ backgroundColor: predominantColor }}
-                      />
-                      <span>Cor detectada</span>
-                    </div>
-                  </div>
-
-                  {/* Identified Can Hero Details */}
-                  <div className="bg-slate-950/70 rounded-xl p-3.5 border border-slate-800 space-y-2">
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-[11px] font-bold text-blue-400 uppercase tracking-wide">
-                        {brand || 'Marca não especificada'}
-                      </span>
-                      <span className="text-[11px] font-semibold text-slate-400">
-                        {volumeMl} ml
-                      </span>
-                    </div>
-
-                    <h3 className="text-base font-extrabold text-white leading-tight">
-                      {product || 'Lata Colecionável'}
-                    </h3>
-
-                    <div className="flex flex-wrap gap-1.5 pt-1">
-                      {variant && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-500/15 border border-blue-500/30 text-xs font-semibold text-blue-300">
-                          <Tag className="w-3 h-3" />
-                          Sabor: {variant}
-                        </span>
-                      )}
-
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-300">
-                        <Droplet className="w-3 h-3 text-cyan-400" />
-                        {CATEGORY_LABELS[category] || category}
-                      </span>
-
-                      {isSpecialEdition && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-500/40 text-xs font-bold text-amber-300">
-                          <Award className="w-3 h-3" />
-                          {specialEditionDetails || 'Edição Especial'}
-                        </span>
-                      )}
-                    </div>
-
-                    {visualDescription && (
-                      <p className="text-[11px] text-slate-400 pt-1 border-t border-slate-800/80 italic">
-                        "{visualDescription}"
-                      </p>
-                    )}
-                  </div>
-
-                  {/* DUPLICATE WARNING (if any) */}
-                  {duplicateWarning && (
-                    <div className="p-3.5 rounded-xl bg-amber-500/15 border-2 border-amber-500/40 space-y-2.5">
-                      <div className="flex items-center gap-1.5 text-amber-400 font-bold text-xs">
-                        <AlertTriangle className="w-4 h-4 shrink-0" />
-                        <span>Atenção! Você pode já ter esta latinha ({duplicateScore}% de similaridade)</span>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 bg-slate-950/70 p-2 rounded-lg border border-slate-800">
-                        <div>
-                          <span className="text-[9px] font-bold text-slate-400 uppercase block mb-0.5">Nova</span>
-                          <p className="text-[11px] font-bold text-white line-clamp-1">{brand} {product}</p>
-                          <p className="text-[10px] text-slate-400">{volumeMl} ml</p>
-                        </div>
-                        <div>
-                          <span className="text-[9px] font-bold text-amber-400 uppercase block mb-0.5">
-                            Na Coleção ({duplicateWarning.quantity} un.)
-                          </span>
-                          <p className="text-[11px] font-bold text-white line-clamp-1">{duplicateWarning.brand} {duplicateWarning.product}</p>
-                          <p className="text-[10px] text-slate-400">{duplicateWarning.volumeMl} ml</p>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          await onIncrementExistingQuantity(duplicateWarning.id);
-                          onClose();
-                        }}
-                        className="w-full py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition shadow flex items-center justify-center gap-1"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        Atualizar quantidade (+1 na lata existente)
-                      </button>
-                    </div>
-                  )}
-
-                  {/* SAVE ERROR MESSAGE (if any) */}
-                  {saveErrorMessage && (
-                    <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs flex items-start gap-2 animate-fade-in">
-                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                      <div className="flex-1">
-                        <p className="font-bold text-white">Erro ao salvar latinha</p>
-                        <p className="text-[11px] text-rose-300/90 mt-0.5">{saveErrorMessage}</p>
-                      </div>
-                      <button 
-                        type="button" 
-                        onClick={() => setSaveErrorMessage(null)}
-                        className="text-slate-400 hover:text-white p-0.5"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  )}
-
-                  {/* ZERO-TYPING PRIMARY ACTION: Confirm and Save */}
+                {/* Photo Actions Overlay */}
+                <div className="absolute bottom-2.5 right-2.5 flex items-center gap-1.5">
                   <button
                     type="button"
-                    disabled={isSaving}
-                    onClick={() => handleSubmit(false)}
-                    className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-blue-600 hover:from-emerald-500 hover:to-blue-500 font-extrabold text-sm text-white shadow-xl shadow-emerald-950/50 flex items-center justify-center gap-2 transition active:scale-[0.98] disabled:opacity-50"
+                    onClick={() => cameraInputRef.current?.click()}
+                    className="px-3 py-1.5 rounded-full bg-slate-900/90 backdrop-blur-md text-[11px] font-semibold text-slate-200 border border-slate-700 hover:bg-slate-800 flex items-center gap-1 shadow-lg active:scale-95 transition"
                   >
-                    {isSaving ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Salvando latinha...
-                      </>
-                    ) : (
-                      <>
-                        <Check className="w-5 h-5 stroke-[2.5]" />
-                        Confirmar e Salvar no Acervo
-                      </>
-                    )}
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Trocar
                   </button>
-
-                  {/* Optional Accordion to tweak details manually if user wishes */}
-                  <div className="pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setShowManualFields(!showManualFields)}
-                      className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs font-semibold text-slate-400 hover:text-slate-200 transition"
-                    >
-                      <span>{showManualFields ? 'Ocultar ajustes manuais' : 'Ajustar detalhes manualmente (opcional)'}</span>
-                      {showManualFields ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                    </button>
-
-                    {showManualFields && (
-                      <div className="space-y-3 pt-3 border-t border-slate-800/80 animate-fade-in">
-                        {/* Marca & Produto */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                          <div>
-                            <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                              Marca
-                            </label>
-                            <input
-                              type="text"
-                              value={brand}
-                              onChange={(e) => setBrand(e.target.value)}
-                              placeholder="ex: Coca-Cola, Monster, Fanta"
-                              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-blue-500"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                              Nome do Produto
-                            </label>
-                            <input
-                              type="text"
-                              value={product}
-                              onChange={(e) => setProduct(e.target.value)}
-                              placeholder="ex: Original, Sem Açúcar"
-                              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-blue-500"
-                            />
-                          </div>
-                        </div>
-
-                        {/* Sabor / Variante & Categoria */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                          <div>
-                            <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                              Sabor ou Variante
-                            </label>
-                            <input
-                              type="text"
-                              value={variant}
-                              onChange={(e) => setVariant(e.target.value)}
-                              placeholder="ex: Melancia, Sem Açúcar, Uva"
-                              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-blue-500"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                              Categoria
-                            </label>
-                            <select
-                              value={category}
-                              onChange={(e) => setCategory(e.target.value as CanCategory)}
-                              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none"
-                            >
-                              {Object.entries(CATEGORY_LABELS).map(([k, label]) => (
-                                <option key={k} value={k}>
-                                  {label}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-
-                        {/* Volume & Quantidade */}
-                        <div className="grid grid-cols-2 gap-2.5">
-                          <div>
-                            <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                              Volume (ml)
-                            </label>
-                            <input
-                              type="number"
-                              value={volumeMl}
-                              onChange={(e) => setVolumeMl(Number(e.target.value))}
-                              placeholder="350"
-                              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                              Unidades Físicas
-                            </label>
-                            <div className="flex items-center bg-slate-950 border border-slate-700 rounded-xl px-2 py-1">
-                              <button
-                                type="button"
-                                onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                                className="p-1 hover:bg-slate-800 rounded text-slate-300"
-                              >
-                                <Minus className="w-3.5 h-3.5" />
-                              </button>
-                              <span className="flex-1 text-center font-bold text-xs text-white">
-                                {quantity}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => setQuantity(quantity + 1)}
-                                className="p-1 hover:bg-slate-800 rounded text-slate-300"
-                              >
-                                <Plus className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Edição Especial */}
-                        <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
-                          <label className="flex items-center gap-2 cursor-pointer select-none">
-                            <input
-                              type="checkbox"
-                              checked={isSpecialEdition}
-                              onChange={(e) => setIsSpecialEdition(e.target.checked)}
-                              className="w-4 h-4 rounded text-blue-600 focus:ring-0"
-                            />
-                            <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                              <Award className="w-3.5 h-3.5 text-amber-400" />
-                              Edição Especial ou Comemorativa
-                            </span>
-                          </label>
-
-                          {isSpecialEdition && (
-                            <input
-                              type="text"
-                              value={specialEditionDetails}
-                              onChange={(e) => setSpecialEditionDetails(e.target.value)}
-                              placeholder="ex: Copa do Mundo, 100 Anos, Coleção de Verão"
-                              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none"
-                            />
-                          )}
-                        </div>
-
-                        {/* Descrição Visual */}
-                        <div>
-                          <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                            Descrição Visual da Embalagem
-                          </label>
-                          <textarea
-                            rows={2}
-                            value={visualDescription}
-                            onChange={(e) => setVisualDescription(e.target.value)}
-                            placeholder="Elementos gráficos, texturas, acabamento..."
-                            className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none resize-none"
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPhotoBase64('')}
+                    className="p-1.5 rounded-full bg-rose-600/90 backdrop-blur-md text-white hover:bg-rose-500 shadow-lg active:scale-95 transition"
+                    title="Remover foto"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-              )}
+              </div>
+            )}
+          </div>
+
+          {/* 2. MARCA */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                Marca <span className="text-rose-400">*</span>
+              </label>
+              <span className="text-[10px] text-slate-400">Toque rápido ou digite</span>
+            </div>
+
+            {/* Quick Brand Badges */}
+            <div className="flex flex-wrap gap-1.5 mb-2.5">
+              {POPULAR_BRANDS.map((b) => (
+                <button
+                  key={b}
+                  type="button"
+                  onClick={() => handleSelectQuickBrand(b)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition active:scale-95 ${
+                    brand.toLowerCase() === b.toLowerCase()
+                      ? 'bg-blue-600 text-white shadow-md shadow-blue-900/40 ring-1 ring-blue-400'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700/60'
+                  }`}
+                >
+                  {b}
+                </button>
+              ))}
+            </div>
+
+            <input
+              type="text"
+              value={brand}
+              onChange={(e) => setBrand(e.target.value)}
+              placeholder="ex: BALY, Coca-Cola, Monster, Red Bull..."
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          {/* 3. NOME DO PRODUTO & SABOR */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                Nome do Produto
+              </label>
+              <input
+                type="text"
+                value={product}
+                onChange={(e) => setProduct(e.target.value)}
+                placeholder="ex: Baly Energy Drink Melancia"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                Sabor ou Variante
+              </label>
+              <input
+                type="text"
+                value={variant}
+                onChange={(e) => setVariant(e.target.value)}
+                placeholder="ex: Melancia Sem Açúcar, Original, Tropical..."
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          {/* 4. CATEGORIA */}
+          <div>
+            <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
+              Categoria
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {(Object.keys(CATEGORY_LABELS) as CanCategory[]).map((catKey) => {
+                const isSelected = category === catKey;
+                return (
+                  <button
+                    key={catKey}
+                    type="button"
+                    onClick={() => setCategory(catKey)}
+                    className={`p-2.5 rounded-xl text-xs font-bold text-left transition flex items-center justify-between border ${
+                      isSelected
+                        ? 'bg-blue-600/25 border-blue-500 text-white shadow'
+                        : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                    }`}
+                  >
+                    <span>{CATEGORY_LABELS[catKey]}</span>
+                    {isSelected && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 5. VOLUME (ML) & UNIDADES */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                Volume (ml)
+              </label>
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {COMMON_VOLUMES.map((vol) => (
+                  <button
+                    key={vol}
+                    type="button"
+                    onClick={() => setVolumeMl(vol)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition active:scale-95 ${
+                      volumeMl === vol
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700/60'
+                    }`}
+                  >
+                    {vol}ml
+                  </button>
+                ))}
+              </div>
+              <input
+                type="number"
+                min="10"
+                max="2000"
+                value={volumeMl}
+                onChange={(e) => setVolumeMl(Number(e.target.value) || 350)}
+                className="w-full px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                Unidades Físicas
+              </label>
+              <div className="flex items-center gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                  className="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white flex items-center justify-center font-bold text-lg active:scale-95 transition"
+                >
+                  <Minus className="w-4 h-4" />
+                </button>
+                <span className="font-black text-xl text-white min-w-[2.5rem] text-center">
+                  {quantity}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setQuantity((q) => q + 1)}
+                  className="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white flex items-center justify-center font-bold text-lg active:scale-95 transition"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-2">
+                Quantidade de latas físicas iguais que você possui.
+              </p>
+            </div>
+          </div>
+
+          {/* 6. COR PREDOMINANTE */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                Cor Predominante da Lata
+              </label>
+              <div className="flex items-center gap-1.5">
+                <span 
+                  className="w-4 h-4 rounded-full border border-white/40 shadow-sm"
+                  style={{ backgroundColor: predominantColor }}
+                />
+                <span className="text-[11px] font-mono text-slate-400">{predominantColor}</span>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {COLOR_SWATCHES.map((swatch) => (
+                <button
+                  key={swatch.hex}
+                  type="button"
+                  onClick={() => setPredominantColor(swatch.hex)}
+                  title={swatch.name}
+                  className={`w-7 h-7 rounded-full transition-transform active:scale-90 border-2 ${
+                    predominantColor.toLowerCase() === swatch.hex.toLowerCase()
+                      ? 'scale-125 border-white shadow-lg'
+                      : 'border-transparent hover:scale-110 opacity-80 hover:opacity-100'
+                  }`}
+                  style={{ backgroundColor: swatch.hex }}
+                />
+              ))}
+
+              <label className="w-7 h-7 rounded-full border border-slate-600 bg-slate-800 flex items-center justify-center cursor-pointer hover:border-slate-400 relative overflow-hidden" title="Escolher cor personalizada">
+                <input
+                  type="color"
+                  value={predominantColor}
+                  onChange={(e) => setPredominantColor(e.target.value)}
+                  className="opacity-0 absolute inset-0 cursor-pointer w-full h-full"
+                />
+                <span className="text-[10px] font-bold text-slate-300">+</span>
+              </label>
+            </div>
+          </div>
+
+          {/* 7. EDIÇÃO ESPECIAL */}
+          <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-2.5">
+            <label className="flex items-center gap-2.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={isSpecialEdition}
+                onChange={(e) => setIsSpecialEdition(e.target.checked)}
+                className="w-4 h-4 rounded text-blue-600 focus:ring-0 bg-slate-900 border-slate-700"
+              />
+              <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                <Award className="w-4 h-4 text-amber-400" />
+                Edição Especial, Comemorativa ou Parceria
+              </span>
+            </label>
+
+            {isSpecialEdition && (
+              <input
+                type="text"
+                value={specialEditionDetails}
+                onChange={(e) => setSpecialEditionDetails(e.target.value)}
+                placeholder="ex: Copa do Mundo, Linha Verão, Collab 100 Anos..."
+                className="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+              />
+            )}
+          </div>
+
+          {/* 8. OBSERVAÇÕES / DETALHES VISUAIS (OPCIONAL) */}
+          <div>
+            <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+              Observações / Detalhes (Opcional)
+            </label>
+            <textarea
+              rows={2}
+              value={visualDescription}
+              onChange={(e) => setVisualDescription(e.target.value)}
+              placeholder="ex: Lata fosca, comprada no mercado, edição sem açúcar..."
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 resize-none"
+            />
+          </div>
+
+          {/* DUPLICATE WARNING MODAL / CARD (if triggered) */}
+          {duplicateWarning && (
+            <div className="p-4 rounded-2xl bg-amber-500/15 border-2 border-amber-500/40 space-y-3 animate-fade-in">
+              <div className="flex items-center gap-2 text-amber-400 font-bold text-xs">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>Atenção: Você já tem esta latinha no acervo! ({duplicateScore}% de similaridade)</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 bg-slate-950/80 p-2.5 rounded-xl border border-slate-800">
+                <div>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase block mb-0.5">Nova</span>
+                  <p className="text-xs font-bold text-white line-clamp-1">{brand} {product}</p>
+                  <p className="text-[10px] text-slate-400">{volumeMl} ml</p>
+                </div>
+                <div>
+                  <span className="text-[9px] font-bold text-amber-400 uppercase block mb-0.5">
+                    No Acervo ({duplicateWarning.quantity} un.)
+                  </span>
+                  <p className="text-xs font-bold text-white line-clamp-1">{duplicateWarning.brand} {duplicateWarning.product}</p>
+                  <p className="text-[10px] text-slate-400">{duplicateWarning.volumeMl} ml</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await onIncrementExistingQuantity(duplicateWarning.id);
+                    onClose();
+                  }}
+                  className="py-2.5 px-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition shadow flex items-center justify-center gap-1"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  +1 na existente
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSubmit(true)}
+                  className="py-2.5 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition border border-slate-700"
+                >
+                  Salvar nova mesmo assim
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* INLINE ERROR MESSAGE (if saving fails) */}
+          {saveErrorMessage && (
+            <div className="p-3.5 rounded-2xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs flex items-start gap-2.5 animate-fade-in">
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="font-bold text-white">Não foi possível salvar</p>
+                <p className="text-[11px] text-rose-300/90 mt-0.5">{saveErrorMessage}</p>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setSaveErrorMessage(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
           )}
         </div>
 
-        {/* Modal Footer (if no photo yet, simple close button) */}
-        {!photoBase64 && (
-          <div className="p-4 border-t border-slate-800 bg-slate-900/90 flex items-center justify-end">
-            <button
-              type="button"
-              onClick={onClose}
-              className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 font-semibold text-xs text-slate-300 transition"
-            >
-              Cancelar
-            </button>
-          </div>
-        )}
+        {/* Modal Footer - Primary Save Action */}
+        <div className="p-4 border-t border-slate-800/80 bg-slate-900/95 sticky bottom-0 z-10 backdrop-blur-md flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={onClose}
+            className="py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 font-semibold text-xs text-slate-300 transition active:scale-95"
+          >
+            Cancelar
+          </button>
+
+          <button
+            type="button"
+            disabled={isSaving}
+            onClick={() => handleSubmit(false)}
+            className="flex-1 py-3.5 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-500 hover:to-indigo-500 font-extrabold text-sm text-white shadow-xl shadow-blue-950/60 flex items-center justify-center gap-2 transition active:scale-[0.98] disabled:opacity-50 border border-blue-400/30"
+          >
+            {isSaving ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Salvando latinha...
+              </>
+            ) : (
+              <>
+                <Check className="w-5 h-5 stroke-[2.5]" />
+                Salvar Latinha no Acervo
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );

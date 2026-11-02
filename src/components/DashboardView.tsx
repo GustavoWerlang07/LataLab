@@ -49,7 +49,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           Minha coleção
         </h1>
         <p className="text-sm text-slate-400 mt-1">
-          Gerencie suas embalagens, confira repetidas e expanda seu acervo com IA.
+          Gerencie suas embalagens, confira repetidas e organize seu acervo pessoal.
         </p>
       </section>
 
@@ -122,7 +122,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
             <div>
               <p className="font-extrabold text-base leading-tight">Adicionar latinha</p>
-              <p className="text-xs text-blue-100/80 mt-0.5">Fotografe ou envie da galeria com identificação por IA</p>
+              <p className="text-xs text-blue-100/80 mt-0.5">Cadastre com foto da câmera ou galeria</p>
             </div>
           </div>
           <ChevronRight className="w-5 h-5 text-blue-200 group-hover:translate-x-1 transition-transform" />
