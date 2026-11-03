@@ -12,11 +12,16 @@ export default defineConfig(() => {
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon.svg'],
+        workbox: {
+          navigateFallbackDenylist: [/^\/api/],
+          globIgnores: ['**/assets/aistudio/**'],
+          maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
+        },
         manifest: {
           id: '/',
           name: 'LataLab — Minha Coleção de Latinhas',
           short_name: 'LataLab',
-          description: 'Gerenciador inteligente de coleção de latinhas com identificação visual por IA.',
+          description: 'Gerenciador completo para coleção pessoal de latinhas de bebidas com fotos e catálogo.',
           theme_color: '#090d16',
           background_color: '#090d16',
           display: 'standalone',
@@ -43,15 +48,11 @@ export default defineConfig(() => {
             },
           ],
         },
-        devOptions: {
-          enabled: true,
-          type: 'module',
-        },
       }),
     ],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(import.meta.dirname || process.cwd(), '.'),
       },
     },
     server: {

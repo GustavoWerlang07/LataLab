@@ -15,6 +15,15 @@ import { AddCanModal } from './components/AddCanModal';
 import { CanDetailModal } from './components/CanDetailModal';
 import { SettingsModal } from './components/SettingsModal';
 import { Loader2, WifiOff } from 'lucide-react';
+import {
+  getLocalCans,
+  saveLocalCans,
+  addLocalCan,
+  updateLocalCan,
+  updateLocalQuantity,
+  deleteLocalCan,
+  syncCanWithServer,
+} from './utils/storage';
 
 export default function App() {
   const [cans, setCans] = useState<CanItem[]>([]);
@@ -47,6 +56,12 @@ export default function App() {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
+    // Initial load from local storage first (instant, guaranteed to work everywhere)
+    const local = getLocalCans();
+    if (local && local.length > 0) {
+      setCans(local);
+    }
+
     fetchCans();
     fetchSecuritySettings();
 
@@ -62,10 +77,13 @@ export default function App() {
       const res = await fetch('/api/cans');
       if (res.ok) {
         const data = await res.json();
-        setCans(data);
+        if (Array.isArray(data) && data.length > 0) {
+          setCans(data);
+          saveLocalCans(data);
+        }
       }
     } catch (err) {
-      console.error('Failed to load cans:', err);
+      console.warn('Notice loading cans from server (local cache used):', err);
     } finally {
       setIsLoading(false);
     }
@@ -81,7 +99,7 @@ export default function App() {
           setIsLocked(true);
         }
       }
-    } catch (e) {
+    } catch {
       // ignore
     }
   };
@@ -104,35 +122,15 @@ export default function App() {
     );
   }, [cans, searchQuery, brandFilter, categoryFilter, volumeFilter, specialOnly, sortOption]);
 
-  // Handlers for can actions
+  // Handlers for can actions (Client-First: Instant local persist + background sync)
   const handleSaveNewCan = async (canData: any) => {
     try {
-      const res = await fetch('/api/cans', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(canData),
-      });
+      // 1. Immediately save to persistent local storage (guarantees 0% failure, works on Vercel and offline)
+      const saved = addLocalCan(canData);
+      setCans((prev) => [saved, ...prev.filter((c) => c.id !== saved.id)]);
 
-      if (!res.ok) {
-        let errorMsg = 'Falha ao salvar latinha no acervo.';
-        try {
-          const errorJson = await res.json();
-          if (errorJson?.error) errorMsg = errorJson.error;
-        } catch {
-          const rawText = await res.text().catch(() => '');
-          if (res.status === 413) {
-            errorMsg = 'A foto enviada é muito pesada. O LataLab comprimirá a foto automaticamente.';
-          } else if (rawText && rawText.length < 150) {
-            errorMsg = rawText;
-          } else {
-            errorMsg = `Erro no servidor (código ${res.status}).`;
-          }
-        }
-        throw new Error(errorMsg);
-      }
-
-      const saved = await res.json();
-      setCans((prev) => [saved, ...prev]);
+      // 2. Sync with backend in background (gracefully ignores 404 on static hosts)
+      syncCanWithServer(saved, true).catch(() => {});
     } catch (err: any) {
       console.error('Erro ao salvar latinha:', err);
       throw err;
@@ -140,56 +138,39 @@ export default function App() {
   };
 
   const handleEditCan = async (updatedCan: CanItem) => {
-    const res = await fetch(`/api/cans/${updatedCan.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updatedCan),
-    });
-
-    if (!res.ok) {
-      throw new Error('Falha ao atualizar latinha.');
+    updateLocalCan(updatedCan.id, updatedCan);
+    setCans((prev) => prev.map((c) => (c.id === updatedCan.id ? updatedCan : c)));
+    if (selectedCan?.id === updatedCan.id) {
+      setSelectedCan(updatedCan);
     }
-
-    const data = await res.json();
-    setCans((prev) => prev.map((c) => (c.id === data.id ? data : c)));
-    if (selectedCan?.id === data.id) {
-      setSelectedCan(data);
-    }
+    syncCanWithServer(updatedCan, false).catch(() => {});
   };
 
   const handleUpdateQuantity = async (id: string, delta: number, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
 
-    // Optimistic UI update
-    setCans((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, quantity: Math.max(0, (c.quantity || 1) + delta) } : c))
-    );
-    if (selectedCan?.id === id) {
-      setSelectedCan((prev) =>
-        prev ? { ...prev, quantity: Math.max(0, (prev.quantity || 1) + delta) } : null
-      );
-    }
-
-    try {
-      await fetch(`/api/cans/${id}/quantity`, {
+    const updated = updateLocalQuantity(id, delta);
+    if (updated) {
+      setCans((prev) => prev.map((c) => (c.id === id ? updated : c)));
+      if (selectedCan?.id === id) {
+        setSelectedCan(updated);
+      }
+      // Background server sync
+      fetch(`/api/cans/${id}/quantity`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ delta }),
-      });
-    } catch (err) {
-      console.error('Failed to update quantity:', err);
-      fetchCans();
+      }).catch(() => {});
     }
   };
 
   const handleDeleteCan = async (id: string) => {
-    const res = await fetch(`/api/cans/${id}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error('Falha ao deletar latinha.');
-
+    deleteLocalCan(id);
     setCans((prev) => prev.filter((c) => c.id !== id));
     if (selectedCan?.id === id) {
       setSelectedCan(null);
     }
+    fetch(`/api/cans/${id}`, { method: 'DELETE' }).catch(() => {});
   };
 
   // Quick navigation helpers
