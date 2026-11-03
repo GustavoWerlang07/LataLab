@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { CanCategory, CanItem } from '../types/can';
 import { CATEGORY_LABELS, findPotentialDuplicates } from '../utils/logic';
+import { addLocalCan } from '../utils/storage';
 import { 
   Camera, 
   Image as ImageIcon, 
@@ -273,7 +274,7 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
         safePhoto = await downscaleDataUrl(safePhoto, 800, 0.7);
       }
 
-      await onSaveNewCan({
+      const payload = {
         brand: finalBrand,
         product: finalProduct,
         variant: finalVariant,
@@ -286,13 +287,33 @@ export const AddCanModal: React.FC<AddCanModalProps> = ({
         quantity: Math.max(1, Number(quantity) || 1),
         originCountry: (originCountry || 'Brasil').trim(),
         imageBase64: safePhoto,
-      });
+      };
+
+      try {
+        await onSaveNewCan(payload);
+      } catch (handlerErr) {
+        console.warn('Handler notice, saving to local storage directly:', handlerErr);
+        addLocalCan(payload);
+      }
+
       onClose();
     } catch (err: any) {
       console.error('Erro ao salvar latinha:', err);
-      setSaveErrorMessage(
-        err?.message || 'Erro ao conectar ao acervo. Verifique os dados e tente novamente.'
-      );
+      // Even in worst-case error, save locally
+      try {
+        addLocalCan({
+          brand: finalBrand,
+          product: finalProduct,
+          variant: finalVariant,
+          category,
+          volumeMl: Number(volumeMl) || 350,
+          predominantColor,
+          quantity: Math.max(1, Number(quantity) || 1),
+        });
+        onClose();
+      } catch {
+        setSaveErrorMessage('Falha ao salvar latinha. Verifique os dados e tente novamente.');
+      }
     } finally {
       setIsSaving(false);
     }
